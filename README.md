@@ -40,8 +40,22 @@ actually run and check -- not an invented business-impact percentage.
   re-runs it on demand. The suggestion is always visible; it only fills
   `required_skills` in, and only above a confidence threshold -- see "A
   note on Phase 3's design choices" below.
-- **Phase 4 -- Dashboard:** not started. React/TypeScript frontend for
-  monitoring orders, assignments, and bottlenecks.
+- **Phase 4 -- Dashboard:** done. A Vite/React/TypeScript single-page app
+  (`frontend/`) against the real API: an Orders table with status/priority
+  filters, a "New order" form that deliberately leaves `required_skills`
+  blank so you can watch Phase 3 classify it live, a "Reclassify" button
+  per row, an Employees table with an add-employee form, and an
+  Assignments panel to trigger a run (FCFS or optimized) and see the
+  result. No mock data anywhere -- every view is a real fetch against
+  `uvicorn app.api:app`. Verified end to end against the live API: a
+  submitted order with blank skills got classified in real time by Phase
+  3 and even surfaced a live instance of the majority-of-pool confidence
+  guard (see "Phase 3 eval results" above) right in the UI -- clearly
+  marked in red at `conf 0%` with `required_skills` left untouched,
+  distinct from a clean case showing `applied ✓` at real confidence.
+  Adding an employee and running an optimized assignment correctly
+  matched both orders and updated the Orders tab without a manual
+  refresh.
 - **Phase 5 -- Human approval & exception handling:** not started.
   Supervisor review queue for low-confidence classifications and
   scheduling overrides.
@@ -82,9 +96,20 @@ POST /orders/{id}/classify
                                      CLASSIFICATION_CONFIDENCE_THRESHOLD
                                  +-- priority is never auto-applied, at
                                      any confidence
+
+frontend/ (Vite + React + TypeScript, port 5173)
+  Orders tab       -> GET /orders?status=...      -> table + filters
+                    -> POST /orders                -> "New order" form
+                    -> POST /orders/{id}/classify   -> per-row "Reclassify"
+  Employees tab    -> GET /employees, POST /employees
+  Assignments tab  -> POST /assignments/run?strategy=fcfs|optimized
+                       -> bumps a refresh signal so the Orders tab
+                          reflects the run without a manual reload
 ```
 
-No live queue/dashboard yet -- that's Phase 4.
+No queue/streaming yet -- the dashboard polls on demand (button clicks,
+tab switches), not a live feed. That's a reasonable scope boundary for
+Phase 4, not a placeholder for something cut.
 
 ## A note on Phase 1's design choices
 
@@ -226,6 +251,57 @@ result. A framework earns its keep when there's real multi-step agentic
 complexity to manage; a single forced tool call isn't that, and pulling
 one in here would be dependency weight without a matching benefit.
 
+## A note on Phase 4's design choices
+
+**Vite + React + TypeScript, no framework beyond that.** No Next.js --
+there's no server-rendering or routing need here, just a client that talks
+to an already-running FastAPI backend. Vite's dev server (instant reload,
+no build step to babysit) is the right amount of tooling for a dashboard
+this size; a metaframework would be solving problems this project doesn't
+have.
+
+**No routing library, no state management library.** Three tabs
+(`Orders` / `Employees` / `Assignments`) are `useState<Tab>` in `App.tsx`,
+not routes -- there's nothing here that needs a URL of its own, browser
+back-button semantics, or deep-linking. Cross-view coordination is a
+single `refreshSignal` counter, bumped by `AssignmentsView` and passed
+into `OrdersView`, so a completed assignment run is reflected the next
+time the Orders tab is viewed without a manual refresh. Redux, Zustand,
+React Query, etc. all solve real problems at a scale this dashboard isn't
+at yet -- three views, one shared signal, plain `useState`/`useEffect` is
+enough, and adding a state library now would be complexity with no
+current payoff.
+
+**CORS is wide open in dev, on purpose, and that's a Phase 6 problem.**
+`app/api.py`'s `CORSMiddleware` allows any method and header from the
+Vite dev origins (`localhost:5173`, `localhost:4173`). That's the right
+posture for a local dashboard talking to a local API during development --
+tightening it to a real origin allowlist only matters once there's an
+actual deployment with real users and a real attack surface to protect,
+which is what Phase 6 is for. Shipping a narrow CORS policy today would be
+false precision: there's no real origin to allowlist yet.
+
+**Suggestions stay visually distinct from authoritative data.**
+`AiSuggestionCell` renders `ai_suggested_skills` / `ai_suggested_priority`
+/ `ai_confidence` separately from the `required_skills` / `priority`
+columns the rest of the table shows, with a visible marker when a
+suggestion was actually applied vs. just offered, and red `conf 0%`
+styling when Phase 3's majority-of-pool guard has zeroed out a
+suggestion's confidence. This mirrors the backend's "suggestion, never an
+override" design (see Phase 3's notes above) in the UI: a human looking at
+the table should be able to tell, at a glance, what the model guessed
+versus what's actually driving the system, not have to trust that they
+match.
+
+**Fetch wrapper over a data-fetching library.** `api.ts` is a small
+generic `request<T>()` helper around `fetch`, distinguishing network
+failures from HTTP errors and parsing FastAPI's `{"detail": ...}` error
+shape -- not React Query, SWR, or similar. There's no caching,
+deduplication, or background-refetch behavior this dashboard actually
+needs yet; views fetch on mount and on explicit user actions (button
+clicks, the `refreshSignal` bump), which is simple to reason about and
+sufficient at this scale.
+
 ## Setup
 
 ```bash
@@ -286,6 +362,26 @@ curl -s -X POST localhost:8001/orders \
 
 curl -s -X POST localhost:8001/orders/1/classify
 ```
+
+Phase 4 -- the dashboard. Needs the API above already running on
+`localhost:8001` (CORS is preconfigured for the Vite dev origins). Run
+this in a separate, plain terminal tab -- not the Python `.venv` from the
+backend setup above, `npm` doesn't live inside that virtualenv:
+
+```bash
+cd frontend
+cp .env.example .env      # only needed if the API isn't on localhost:8001
+npm install
+npm run dev                # -> http://localhost:5173
+```
+
+Open `http://localhost:5173` in a browser. The Orders tab lists existing
+orders and filters by status; "New order" submits through `POST /orders`
+(triggering Phase 3 classification when `required_skills` is left blank);
+each row has a "Reclassify" button hitting `POST /orders/{id}/classify`.
+The Employees tab adds employees. The Assignments tab runs `fcfs` or
+`optimized` and shows the result -- switching back to Orders afterward
+reflects the run without a manual reload.
 
 ## Phase 2 benchmark results
 
@@ -453,8 +549,11 @@ calls on every test run.
 - **SQLAlchemy 2.0 + PostgreSQL** -- storage
 - **Google OR-Tools (CP-SAT)** -- Phase 2's optimized assignment
 - **OpenAI SDK (function/tool-calling)** -- Phase 3's classification
+- **Vite + React + TypeScript** -- Phase 4's dashboard (Orders, Employees,
+  Assignments views against the live API; no routing or state library --
+  see "A note on Phase 4's design choices" above)
 - **pytest** -- tests, running against isolated in-memory SQLite
 - **Docker Compose** -- local Postgres
 
-(React, Redis, Celery, LangGraph, and real cloud deployment arrive in
-later phases -- see "Where this stands" above.)
+(Redis, Celery, LangGraph, and real cloud deployment arrive in later
+phases -- see "Where this stands" above.)

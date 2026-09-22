@@ -12,6 +12,7 @@ import os
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app.assignment import EmployeeCandidate, OrderCandidate, fcfs_assign, optimized_assign
@@ -28,6 +29,21 @@ from app.schemas import (
 from app.validation import validate_order
 
 app = FastAPI(title="AI Operations Control Tower")
+
+# Phase 4: the dashboard (frontend/) runs on Vite's dev server (port 5173
+# by default; 4173 for `vite preview`) and calls this API directly from
+# the browser, which means the browser enforces CORS on every request.
+# Wide open (any method, any header) rather than a curated allowlist --
+# this is a local dev dashboard talking to a local dev API, not a public
+# deployment with real users to protect; Phase 6 (real deployment) is the
+# right place to tighten this to an actual origin allowlist.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:4173", "http://127.0.0.1:5173"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Below this, an AI suggestion is stored for visibility but not applied.
 # See "A note on Phase 3's design choices" in the README for why 0.6 and

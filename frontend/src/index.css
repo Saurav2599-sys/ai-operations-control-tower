@@ -1,0 +1,393 @@
+:root {
+  --bg: #0f1420;
+  --panel: #161d2e;
+  --panel-border: #26304a;
+  --text: #e4e8f1;
+  --text-dim: #93a0bd;
+  --accent: #4d8dff;
+  --accent-dim: #2a4a85;
+  --red: #ef5866;
+  --orange: #e69a3c;
+  --green: #48c78e;
+  --gray: #5b6785;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.app-header h1 {
+  margin: 0 0 4px;
+  font-size: 1.6rem;
+}
+
+.app-subtitle {
+  margin: 0 0 24px;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--panel-border);
+  margin-bottom: 24px;
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 10px 16px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.view-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.view-subtitle {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  max-width: 640px;
+  margin: 0 0 16px;
+}
+
+.filter-group {
+  display: flex;
+  gap: 6px;
+}
+
+.filter-btn {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.filter-btn-active {
+  background: var(--accent-dim);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+}
+
+button.small {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.panel-form {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+}
+
+.panel-form label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.label-hint {
+  font-weight: normal;
+  opacity: 0.8;
+}
+
+.panel-form input,
+.panel-form select,
+.panel-form textarea {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.panel-form button {
+  align-self: flex-start;
+}
+
+.form-error {
+  color: var(--red);
+  font-size: 0.85rem;
+}
+
+.empty-state {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  padding: 24px 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--text-dim);
+  font-weight: 600;
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+}
+
+tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.description-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-status-received {
+  background: rgba(91, 103, 133, 0.25);
+  color: var(--gray);
+}
+.badge-status-validated {
+  background: rgba(77, 141, 255, 0.2);
+  color: var(--accent);
+}
+.badge-status-assigned {
+  background: rgba(72, 199, 142, 0.2);
+  color: var(--green);
+}
+.badge-status-duplicate {
+  background: rgba(91, 103, 133, 0.25);
+  color: var(--text-dim);
+}
+.badge-status-rejected {
+  background: rgba(239, 88, 102, 0.2);
+  color: var(--red);
+}
+
+.badge-priority-low {
+  background: rgba(91, 103, 133, 0.25);
+  color: var(--gray);
+}
+.badge-priority-normal {
+  background: rgba(77, 141, 255, 0.2);
+  color: var(--accent);
+}
+.badge-priority-high {
+  background: rgba(230, 154, 60, 0.2);
+  color: var(--orange);
+}
+.badge-priority-urgent {
+  background: rgba(239, 88, 102, 0.2);
+  color: var(--red);
+}
+
+.validation-errors {
+  font-size: 0.75rem;
+  color: var(--red);
+  margin-top: 4px;
+  cursor: help;
+}
+
+.ai-cell {
+  min-width: 160px;
+  cursor: help;
+}
+
+.ai-cell-none {
+  color: var(--text-dim);
+}
+
+.ai-cell-skills {
+  font-size: 0.85rem;
+}
+
+.ai-cell-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.ai-cell-conf {
+  color: var(--green);
+}
+
+.ai-cell-conf-zero {
+  color: var(--red);
+}
+
+.ai-cell-applied {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.strategy-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  max-width: 560px;
+}
+
+.strategy-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.strategy-option-active {
+  border-color: var(--accent);
+}
+
+.strategy-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.strategy-blurb {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.run-result {
+  margin-top: 20px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 16px;
+  max-width: 560px;
+}
+
+.run-result h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+
+.run-result dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.run-result dt {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.run-result dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.run-result-ids {
+  margin: 12px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
