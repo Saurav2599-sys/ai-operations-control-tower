@@ -21,14 +21,24 @@ export function AiSuggestionCell({ order }: { order: Order }) {
       </div>
       <div className="ai-cell-meta">
         {order.ai_suggested_priority && (
-          <span className="ai-cell-priority">priority: {order.ai_suggested_priority}</span>
+          <span className="ai-cell-priority">
+            priority: {order.ai_suggested_priority}
+            <span className="ai-cell-priority-note"> (never auto-applied)</span>
+          </span>
         )}
         {confidencePct !== null && (
           <span className={confidencePct === 0 ? "ai-cell-conf-zero" : "ai-cell-conf"}>
             conf {confidencePct}%
           </span>
         )}
-        {wasApplied && <span className="ai-cell-applied">applied ✓</span>}
+        {/* Named "skills applied", not bare "applied" -- this only ever
+            reflects required_skills being copied over. Priority is never
+            auto-applied at any confidence (see the README's Phase 3
+            design notes), so the "(never auto-applied)" note next to it
+            above is unconditional, not just shown when it wasn't this
+            time -- otherwise a viewer could misread the single checkmark
+            here as covering both fields. */}
+        {wasApplied && <span className="ai-cell-applied">skills applied ✓</span>}
       </div>
     </div>
   );

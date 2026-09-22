@@ -42,9 +42,27 @@ class Assignment:
 
 def _skills_covered(order: OrderCandidate, employee: EmployeeCandidate) -> bool:
     """An employee can take the order if they have every skill it asks for.
-    An order with no required_skills can go to anyone."""
+    An order with blank/unknown required_skills is NOT eligible for
+    matching -- it stays out of the assignment pool (same as "no employee
+    covers it yet": left unassigned, eligible for a later run) until a
+    human fills in required_skills or a (re)classification clears the
+    confidence threshold.
+
+    This used to return True for a blank required_skills -- "no
+    constraint, anyone can do it" -- which was a reasonable rule back
+    when Phase 2 was the only source of required_skills and blank only
+    ever meant a human explicitly didn't specify one. Phase 3 changed
+    what blank can mean: it's also what a low-confidence or
+    majority-of-pool-guard-zeroed classification leaves behind (see "A
+    note on Phase 3's design choices" in the README). Treating that the
+    same as "no constraint" quietly defeated the point of the confidence
+    guard -- an order the system explicitly doesn't trust a
+    classification for would still get silently scheduled as if it
+    needed nothing at all. Caught via real Phase 4 dashboard testing
+    (a batch of seeded orders included several majority-of-pool guard
+    hits that still showed up "Assigned"), not found in isolation."""
     if not order.required_skills:
-        return True
+        return False
     return order.required_skills.issubset(employee.skills)
 
 

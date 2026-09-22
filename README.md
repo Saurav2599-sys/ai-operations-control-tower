@@ -167,6 +167,27 @@ order lists, via plain `frozenset.issubset`) so the benchmark in the next
 section is actually comparing *assignment strategy*, not two different
 definitions of "can this employee do this job."
 
+**Blank `required_skills` is "unknown," not "no constraint" -- fixed
+after real Phase 4 testing surfaced the gap.** `_skills_covered()`
+originally returned `True` for a blank `required_skills` -- "no
+constraint, anyone can do it." That was reasonable when Phase 2 was the
+only source of `required_skills` and blank only ever meant a human
+explicitly didn't specify one. Phase 3 changed what blank can mean: it's
+also what a low-confidence or majority-of-pool-guard-zeroed
+classification leaves behind (see "A note on Phase 3's design choices"
+below). Treating those the same quietly defeated the point of the
+confidence guard -- an order the system explicitly doesn't trust a
+classification for would still get silently scheduled as if it needed
+nothing at all. This wasn't caught in isolation; it showed up seeding
+realistic data into the Phase 4 dashboard, where a few majority-of-pool
+guard hits (correctly shown at `conf 0%`, `required_skills` untouched)
+still ended up `"Assigned"` in the Orders table. `_skills_covered()` now
+returns `False` for blank `required_skills` -- that order stays
+`"validated"` (same as "no employee covers it yet") until a human fills
+it in or a classification actually clears the threshold. Doesn't change
+the Phase 2 benchmark numbers below -- the synthetic dataset always gives
+every order 1-2 real skills, never blank.
+
 **Why CP-SAT over a greedy heuristic for the "optimized" path.** A hand-
 written heuristic (e.g. "sort by priority, then greedily assign") gets
 most of the benefit and is easier to reason about line by line -- but it's

@@ -321,6 +321,11 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+.ai-cell-priority-note {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .strategy-picker {
   display: flex;
   flex-direction: column;

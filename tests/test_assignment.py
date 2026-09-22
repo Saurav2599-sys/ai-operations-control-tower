@@ -74,11 +74,15 @@ def test_fcfs_falls_back_to_out_of_location_employee_when_needed():
     assert result[0].location_match is False
 
 
-def test_fcfs_order_with_no_required_skills_can_go_to_anyone():
+def test_fcfs_order_with_blank_required_skills_stays_unassigned():
+    """Blank required_skills means "unknown," not "no constraint" -- see
+    _skills_covered's docstring for why this flipped from the original
+    Phase 2 behavior once Phase 3 could also leave this blank (a
+    low-confidence or guard-zeroed classification)."""
     orders = [_order(1, skills=set())]
     employees = [_employee(1, skills={"electrical"}, daily_capacity=1)]
     result = fcfs_assign(orders, employees)
-    assert result[0].employee_id == 1
+    assert result[0].employee_id is None
 
 
 # ---- optimized_assign --------------------------------------------------
@@ -123,3 +127,14 @@ def test_optimized_never_exceeds_employee_capacity():
     result = optimized_assign(orders, employees)
     assigned = [a for a in result if a.employee_id == 1]
     assert len(assigned) <= 2
+
+
+def test_optimized_order_with_blank_required_skills_stays_unassigned():
+    """Same fix, same reasoning, both strategies -- optimized_assign builds
+    its pair_vars from the same _skills_covered() check as fcfs_assign, so
+    this needs its own regression test rather than trusting the fcfs
+    coverage to imply it."""
+    orders = [_order(1, skills=set())]
+    employees = [_employee(1, skills={"electrical"}, daily_capacity=1)]
+    result = optimized_assign(orders, employees)
+    assert result[0].employee_id is None
