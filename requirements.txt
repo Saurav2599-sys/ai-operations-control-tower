@@ -1,0 +1,17 @@
+# Web framework + server
+fastapi
+uvicorn[standard]
+
+# ORM + Postgres driver. psycopg2-binary trades a bit of install-time
+# convenience for not needing Postgres dev headers on your machine -- fine
+# for local/portfolio use; a production build would use psycopg2 built
+# from source instead.
+sqlalchemy>=2.0
+psycopg2-binary
+
+pydantic>=2.0
+python-dotenv
+
+# Testing. httpx is what FastAPI's TestClient uses under the hood.
+pytest
+httpx
