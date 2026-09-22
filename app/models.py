@@ -1,12 +1,33 @@
-"""The Order model. Phase 1 is deliberately just this one table -- ingestion,
-validation, and duplicate detection don't need employees, assignments, or a
-scheduler yet. Those arrive in Phase 2+ once this foundation is solid.
+"""The Order and Employee models.
+
+Phase 1 shipped with just Order -- ingestion, validation, and duplicate
+detection didn't need employees or a scheduler yet. Phase 2 adds Employee
+and the assignment fields on Order (assigned_employee_id, assigned_at),
+plus the "assigned" status the state machine comment below always said
+was coming.
 """
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+
+
+class Employee(Base):
+    __tablename__ = "employees"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    location = Column(String, nullable=True)
+    skills = Column(String, nullable=True)  # comma-separated, same convention as Order
+    # How many orders this employee can take on per assignment run. A
+    # plain int rather than a real calendar/availability model -- Phase 2
+    # is about the assignment algorithm, not staffing/scheduling UI; a
+    # richer availability model is a reasonable place for a later phase
+    # to extend this, not something to speculatively build now.
+    daily_capacity = Column(Integer, nullable=False, default=5)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class Order(Base):
@@ -20,9 +41,12 @@ class Order(Base):
     priority = Column(String, nullable=False, default="normal")
     required_skills = Column(String, nullable=True)  # comma-separated for now
 
-    # received -> validated -> (duplicate | rejected) is the Phase 1 state
-    # machine. assigned/in_progress/completed arrive with the scheduler in
-    # Phase 2.
+    # received -> validated -> (duplicate | rejected) was the Phase 1 state
+    # machine. Phase 2 adds "assigned": an order moves there once a
+    # successful assignment run gives it an employee. An order that stays
+    # "validated" just hasn't been matched yet (no capable/available
+    # employee) -- it's eligible to be picked up by a later assignment run,
+    # not stuck.
     status = Column(String, nullable=False, default="received")
 
     # JSON-encoded list of human-readable validation problems, e.g.
@@ -39,6 +63,12 @@ class Order(Base):
     dedupe_key = Column(String, nullable=True, index=True)
     duplicate_of_id = Column(Integer, ForeignKey("orders.id"), nullable=True)
     duplicate_of = relationship("Order", remote_side=[id])
+
+    # Set by an assignment run (see app/assignment.py + the /assignments/run
+    # endpoint). Null until an employee is actually assigned.
+    assigned_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    assigned_employee = relationship("Employee")
+    assigned_at = Column(DateTime(timezone=True), nullable=True)
 
     # The exact payload as submitted, for audit -- if validation logic
     # changes later, you can always see what was actually sent.

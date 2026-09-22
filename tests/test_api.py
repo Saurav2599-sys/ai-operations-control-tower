@@ -71,3 +71,65 @@ def test_list_orders_filters_by_status(client):
 def test_get_nonexistent_order_is_404(client):
     resp = client.get("/orders/99999")
     assert resp.status_code == 404
+
+
+# ---- Phase 2: employees + assignment -------------------------------------
+
+def test_create_and_list_employees(client):
+    resp = client.post("/employees", json={
+        "name": "Jordan Diaz", "location": "Austin, TX",
+        "skills": "plumbing,hvac", "daily_capacity": 3,
+    })
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["name"] == "Jordan Diaz"
+    assert body["daily_capacity"] == 3
+
+    listed = client.get("/employees").json()
+    assert len(listed) == 1
+    assert listed[0]["name"] == "Jordan Diaz"
+
+
+def test_assignment_run_fcfs_assigns_matching_order(client):
+    client.post("/employees", json={
+        "name": "Jordan Diaz", "location": "Austin, TX",
+        "skills": "plumbing", "daily_capacity": 5,
+    })
+    order = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "Fix the leaking pipe",
+        "location": "Austin, TX", "priority": "high", "required_skills": "plumbing",
+    }).json()
+    assert order["status"] == "validated"
+
+    result = client.post("/assignments/run", params={"strategy": "fcfs"}).json()
+    assert result["assigned"] == 1
+    assert order["id"] in result["assigned_order_ids"]
+
+    refreshed = client.get(f"/orders/{order['id']}").json()
+    assert refreshed["status"] == "assigned"
+    assert refreshed["assigned_employee_id"] is not None
+    assert refreshed["assigned_at"] is not None
+
+
+def test_assignment_run_leaves_uncoverable_order_as_validated(client):
+    client.post("/employees", json={
+        "name": "Jordan Diaz", "location": "Austin, TX",
+        "skills": "plumbing", "daily_capacity": 5,
+    })
+    order = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "Rewire the panel",
+        "location": "Austin, TX", "priority": "high", "required_skills": "electrical",
+    }).json()
+
+    result = client.post("/assignments/run", params={"strategy": "fcfs"}).json()
+    assert result["assigned"] == 0
+    assert result["unassigned"] == 1
+
+    refreshed = client.get(f"/orders/{order['id']}").json()
+    assert refreshed["status"] == "validated"
+    assert refreshed["assigned_employee_id"] is None
+
+
+def test_assignment_run_rejects_unknown_strategy(client):
+    resp = client.post("/assignments/run", params={"strategy": "bogus"})
+    assert resp.status_code == 400

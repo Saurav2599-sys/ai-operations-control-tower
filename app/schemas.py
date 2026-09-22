@@ -31,7 +31,40 @@ class OrderOut(BaseModel):
     status: str
     validation_errors: list[str] = []
     duplicate_of_id: Optional[int]
+    assigned_employee_id: Optional[int]
+    assigned_at: Optional[datetime]
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class EmployeeCreate(BaseModel):
+    name: str = Field(..., description="Employee name")
+    location: Optional[str] = None
+    skills: Optional[str] = Field(
+        default=None, description="Comma-separated skills, e.g. 'plumbing,hvac'"
+    )
+    daily_capacity: int = Field(
+        default=5, ge=1, description="Max orders this employee can be assigned per run"
+    )
+
+
+class EmployeeOut(BaseModel):
+    id: int
+    name: str
+    location: Optional[str]
+    skills: Optional[str]
+    daily_capacity: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AssignmentRunResult(BaseModel):
+    strategy: str
+    considered: int
+    assigned: int
+    unassigned: int
+    assigned_order_ids: list[int]

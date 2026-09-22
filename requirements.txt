@@ -12,6 +12,10 @@ psycopg2-binary
 pydantic>=2.0
 python-dotenv
 
+# Phase 2: order-to-employee assignment. CP-SAT is the constraint solver
+# used in app/assignment.py's optimized_assign().
+ortools
+
 # Testing. httpx is what FastAPI's TestClient uses under the hood.
 pytest
 httpx
