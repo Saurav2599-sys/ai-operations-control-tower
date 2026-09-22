@@ -33,10 +33,13 @@ actually run and check -- not an invented business-impact percentage.
   `scripts/benchmark.py` runs both against the same synthetic 1,000-order
   dataset -- see "Phase 2 benchmark results" below for what that actually
   showed.
-- **Phase 3 -- AI-assisted classification:** not started. LLM tool-calling
-  to interpret free-text order descriptions and extract structured
-  requirements, feeding into (not overriding) Phase 2's deterministic
-  assignment rules.
+- **Phase 3 -- AI-assisted classification:** done. `POST /orders`
+  automatically classifies the free-text `description` with an LLM
+  (forced tool-calling, not a hopeful system prompt) whenever
+  `required_skills` wasn't given, and `POST /orders/{id}/classify`
+  re-runs it on demand. The suggestion is always visible; it only fills
+  `required_skills` in, and only above a confidence threshold -- see "A
+  note on Phase 3's design choices" below.
 - **Phase 4 -- Dashboard:** not started. React/TypeScript frontend for
   monitoring orders, assignments, and bottlenecks.
 - **Phase 5 -- Human approval & exception handling:** not started.
@@ -65,9 +68,23 @@ POST /assignments/run?strategy=fcfs|optimized
                                  +-- optimized_assign(): OR-Tools CP-SAT,
                                      maximizes priority-weighted, capacity-
                                      constrained matches
+
+POST /orders (required_skills blank)
+POST /orders/{id}/classify
+                   -> FastAPI -> app/classification.py -> OpenAI
+                        (forced tool call: extract_order_requirements)
+                                 |
+                                 +-- always stored: ai_suggested_skills,
+                                     ai_suggested_priority, ai_confidence,
+                                     ai_reasoning, ai_classified_at
+                                 +-- required_skills filled in only if it
+                                     was blank AND confidence clears
+                                     CLASSIFICATION_CONFIDENCE_THRESHOLD
+                                 +-- priority is never auto-applied, at
+                                     any confidence
 ```
 
-No LLM, no live queue/dashboard yet -- those are Phase 3 and Phase 4.
+No live queue/dashboard yet -- that's Phase 4.
 
 ## A note on Phase 1's design choices
 
@@ -135,6 +152,80 @@ problem: maximize total priority-weighted value subject to the real
 capacity constraints, all at once. `scripts/benchmark.py` is what turns
 "CP-SAT should do better" into a number instead of an assumption.
 
+## A note on Phase 3's design choices
+
+**A suggestion, never an override.** Every classification result is stored
+in its own `ai_*` columns (`ai_suggested_skills`, `ai_suggested_priority`,
+`ai_confidence`, `ai_reasoning`, `ai_classified_at`) -- separate from the
+authoritative `required_skills` and `priority` fields the rest of the
+system actually acts on. `required_skills` is copied over from the
+suggestion only when it was blank to begin with *and* `ai_confidence`
+clears `CLASSIFICATION_CONFIDENCE_THRESHOLD` (0.6 by default). If a human
+already specified `required_skills`, classification for that order isn't
+even run.
+
+**`priority` is never auto-applied, at any confidence.** Skills and
+priority get treated differently on purpose. A wrong guessed skill mostly
+costs efficiency -- the wrong employee gets considered, or a coverable
+order doesn't get matched this run, both recoverable. A wrong priority is
+a different kind of mistake: it changes whose problem gets treated as
+urgent, and getting that wrong has real consequences in a system meant to
+actually run a business. `ai_suggested_priority` is always visible in the
+response for a human (or Phase 5's review queue) to act on, but nothing
+in Phase 3 writes it into `priority` for them.
+
+**Why 0.6.** It's a starting point, not a tuned number -- there's no
+labeled production traffic yet to tune it against. It's deliberately on
+the conservative side (a coin-flip-confidence suggestion doesn't get
+applied), and it's a single env var (`CLASSIFICATION_CONFIDENCE_THRESHOLD`)
+specifically so it can move once real data says it should, without a code
+change.
+
+**The tool call is forced, not requested.** `classify_order()` passes
+`tool_choice={"type": "function", "function": {"name":
+"extract_order_requirements"}}` rather than leaving it to the model's
+discretion. This is the same lesson the
+[Autonomous Workflow Broker](https://github.com/Saurav2599-sys/autonomous-workflow-broker)
+project learned the hard way: a system prompt that says "you must call
+this tool" is a request the model is free to ignore; `tool_choice` pinned
+to one specific tool isn't a request.
+
+**Defense in depth on the model's output, even with a constrained schema.**
+`required_skills` is JSON-schema-enum-constrained to
+`app.constants.SKILL_POOL`, but `classify_order()` still filters the
+returned list against that same pool before using it, clamps `confidence`
+into `[0.0, 1.0]`, and falls back `suggested_priority` to `"normal"` if
+it's not one of the four allowed values. None of that should be reachable
+given the schema -- it's there because "should be unreachable" and "is
+unreachable" aren't the same claim, and a hallucinated skill silently
+making it into `required_skills` would make an order permanently
+unassignable without anyone knowing why.
+
+**A classification failure never fails order submission.** If the OpenAI
+call errors, times out, or returns something `classify_order()` can't
+parse, `_run_classification()` (used at submission time) catches
+`ClassificationError` and simply leaves the `ai_*` fields blank -- the
+order still gets created and validated normally. Phase 3 is an enrichment
+layer order ingestion doesn't depend on, not a hard dependency; an
+OpenAI outage shouldn't take `/orders` down with it. `POST
+/orders/{id}/classify`, by contrast, does surface a failure (as a `502`)
+-- there, the caller explicitly asked for a classification result and
+deserves to know it didn't get one, rather than a silent no-op.
+
+**It's a synchronous call inside the request, for now.** `POST /orders`
+blocks on the OpenAI call when it fires, adding real LLM latency (see the
+eval results below for what that latency actually is) to that request. No
+queue, no background worker for this yet. That's an acceptable tradeoff at
+current scale and becomes the obvious thing to fix -- a background job,
+the same way the Autonomous Workflow Broker project uses Celery -- once
+it's an actual measured problem rather than a hypothetical one.
+
+**Plain OpenAI SDK over a framework.** No LangChain, no agent framework --
+one function-calling request, one tool, one deterministic parse of the
+result. A framework earns its keep when there's real multi-step agentic
+complexity to manage; a single forced tool call isn't that, and pulling
+one in here would be dependency weight without a matching benefit.
+
 ## Setup
 
 ```bash
@@ -154,6 +245,11 @@ extensions like pandas/pyarrow already present) risks a hard crash
 the moment `ortools` gets imported, from two protobuf runtimes fighting
 over the same descriptor registry. A clean venv sidesteps that instead of
 trying to pin versions in a shared environment you don't fully control.
+
+Phase 3 needs a real `OPENAI_API_KEY` in `.env` to actually call the
+model -- without one, `POST /orders` and `POST /orders/{id}/classify`
+still work, they just leave the `ai_*` fields blank (see "A classification
+failure never fails order submission" above).
 
 Try it:
 
@@ -175,6 +271,20 @@ curl -s -X POST localhost:8001/employees \
 
 curl -s -X POST "localhost:8001/assignments/run?strategy=optimized"
 curl -s localhost:8001/orders   # assigned orders now show assigned_employee_id
+```
+
+Phase 3 -- submit an order with no `required_skills` and let the model
+suggest them, then re-classify an existing order on demand:
+
+```bash
+curl -s -X POST localhost:8001/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customer_name": "Acme Corp", "description": "The AC unit stopped working completely and it is 95 degrees inside the warehouse", "location": "Austin, TX", "priority": "normal"}'
+# -> required_skills is filled in from ai_suggested_skills if confidence
+#    cleared the threshold; ai_suggested_priority, ai_confidence, and
+#    ai_reasoning are always in the response either way
+
+curl -s -X POST localhost:8001/orders/1/classify
 ```
 
 ## Phase 2 benchmark results
@@ -230,6 +340,85 @@ single order submission instead.
 *(These numbers are from one seeded run -- `python -m scripts.benchmark`
 is right there to reproduce or challenge them.)*
 
+## Phase 3 eval results
+
+```bash
+python -m scripts.eval_classification
+```
+
+Unlike the Phase 2 benchmark, this makes real OpenAI API calls (18 of
+them, one per hand-labeled case in `scripts/eval_classification.py`) --
+needs a real `OPENAI_API_KEY` in `.env`, costs a small real amount of
+money per run, and isn't reproducible bit-for-bit the way a seeded
+in-memory benchmark is. The eval set is 18 realistic work-order
+descriptions I hand-labeled myself, spanning all 8 skills in
+`app.constants.SKILL_POOL` and all 4 priority levels -- a small,
+subjective ground truth, not a rigorous benchmark, but enough to catch
+obviously bad extractions and produce a real, reproducible-in-kind number
+instead of a vibe.
+
+```
+                            Value
+--------------------------------------
+Cases evaluated              18/18
+Failed calls                 0
+Skill exact-match rate       66.7%
+Skill precision (mean)       74.3%
+Skill recall (mean)          86.1%
+Skill F1 (mean)              74.1%
+Priority accuracy            61.1%
+Mean confidence reported     0.67
+Mean latency/call            1.22s
+```
+
+**What this actually shows.** This run is after the majority-of-pool
+guard described below was added, and its fingerprint is right there in
+the numbers: 3 of 18 cases (17%) still got the same repeatable failure
+mode a first, pre-guard run surfaced -- the model returning *all 8
+skills in the pool* instead of the 1-2 that actually applied (e.g. "one
+of the exposed wires near the breaker panel is sparking," expected:
+`electrical`, came back with `carpentry, electrical, general_repair,
+hvac, inspection, painting, plumbing, welding`) -- but this time reported
+at `conf=0.00` instead of the 0.80-0.90 the pre-guard run showed for the
+same pattern. `classify_order()` now clamps confidence to 0 whenever it
+returns a majority of the entire pool at once (real orders never need
+more than a couple of skills; see `tests/test_classification.py`'s
+`test_classify_order_treats_majority_of_pool_as_untrustworthy`), so
+these three can never clear `CLASSIFICATION_CONFIDENCE_THRESHOLD` and
+silently overwrite `required_skills` -- the raw (still-wrong) suggestion
+just stays visible in `ai_suggested_skills` for a human to look at.
+
+Worth being honest about what the guard does and doesn't fix: skill
+precision/recall/F1 here (74.3% / 86.1% / 74.1%) are barely different
+from the pre-guard run (75.0% / 91.7% / 75.3%) -- and that's expected,
+not a sign the guard failed. This eval script scores raw extraction
+quality (`suggested_skills` vs. the hand-labeled answer), which the guard
+doesn't touch; it only stops a bad extraction from being *trusted*. The
+guard's actual effect shows up in mean confidence dropping from 0.81 to
+0.67 -- that's three real cases getting hard-clamped to 0 instead of
+sailing through the threshold. Fixing the extraction itself (getting the
+model to stop returning the whole pool in the first place) is a separate,
+open problem -- prompt tuning, a stricter system message, or a smaller
+`max_tokens` are plausible next things to try, not attempted here.
+
+Priority accuracy (61.1%) and the skill scores both moved a bit from the
+first run purely from real API non-determinism -- same 18 cases, same
+model, different day, slightly different answers (e.g. the ceiling-tile
+repainting case was wrong the first run and right this one; the fire-
+extinguisher inspection case was right the first run and missed this
+one). That's disclosed here rather than smoothed over: these are live
+calls to a non-deterministic model, not a seeded, reproducible benchmark
+like Phase 2's.
+
+Mean latency (1.22s/call) is the real cost of the synchronous design
+choice described above -- every `POST /orders` that triggers
+classification blocks for roughly that long.
+
+*(These numbers are from one real run against an 18-case, hand-labeled
+set -- `python -m scripts.eval_classification` is right there to
+reproduce or challenge them, and a re-run will likely differ slightly for
+the reasons above.)*
+
 ## Tests
 
 ```bash
@@ -248,11 +437,22 @@ directly against plain dataclasses (no DB, no FastAPI) -- the
 `optimized_assign` tests are skipped automatically (`pytest.importorskip`)
 if `ortools` isn't installed, rather than failing the whole suite.
 
+`tests/test_classification.py` tests `classify_order()` against a fake
+OpenAI client (no real API key or network call needed) -- forced
+tool-choice, skill-pool filtering, priority fallback, confidence clamping,
+and error handling on a malformed or failed call. The Phase 3 tests in
+`tests/test_api.py` go through the real HTTP layer with
+`classify_order` monkeypatched, so they prove the suggest-don't-override
+wiring (confidence threshold, graceful degradation on `POST /orders`,
+`502` on a failed `POST /orders/{id}/classify`) without spending real API
+calls on every test run.
+
 ## Tech stack
 
 - **FastAPI** -- REST API
 - **SQLAlchemy 2.0 + PostgreSQL** -- storage
 - **Google OR-Tools (CP-SAT)** -- Phase 2's optimized assignment
+- **OpenAI SDK (function/tool-calling)** -- Phase 3's classification
 - **pytest** -- tests, running against isolated in-memory SQLite
 - **Docker Compose** -- local Postgres
 

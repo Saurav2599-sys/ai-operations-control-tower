@@ -16,6 +16,11 @@ python-dotenv
 # used in app/assignment.py's optimized_assign().
 ortools
 
+# Phase 3: LLM-based classification of free-text order descriptions
+# (app/classification.py). Plain OpenAI SDK, function/tool-calling --
+# no LangChain or agent framework, see the README for why.
+openai
+
 # Testing. httpx is what FastAPI's TestClient uses under the hood.
 pytest
 httpx

@@ -22,17 +22,7 @@ from app.assignment import (
     fcfs_assign,
     optimized_assign,
 )
-
-SKILL_POOL = [
-    "electrical",
-    "plumbing",
-    "hvac",
-    "carpentry",
-    "welding",
-    "painting",
-    "general_repair",
-    "inspection",
-]
+from app.constants import SKILL_POOL
 
 LOCATIONS = [
     "Austin, TX",

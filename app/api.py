@@ -1,5 +1,6 @@
-"""REST API: order ingestion/validation/duplicate detection (Phase 1) plus
-employees and order-to-employee assignment (Phase 2).
+"""REST API: order ingestion/validation/duplicate detection (Phase 1),
+employees and order-to-employee assignment (Phase 2), and LLM-based
+classification of free-text order descriptions (Phase 3).
 
 Run with:  uvicorn app.api:app --reload --port 8001
 (port 8001, not 8000 -- the Autonomous Workflow Broker project's API
@@ -14,6 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.assignment import EmployeeCandidate, OrderCandidate, fcfs_assign, optimized_assign
+from app.classification import ClassificationError, classify_order
 from app.db import get_db, init_db
 from app.models import Employee, Order
 from app.schemas import (
@@ -26,6 +28,13 @@ from app.schemas import (
 from app.validation import validate_order
 
 app = FastAPI(title="AI Operations Control Tower")
+
+# Below this, an AI suggestion is stored for visibility but not applied.
+# See "A note on Phase 3's design choices" in the README for why 0.6 and
+# why this only ever fills required_skills, never priority.
+CLASSIFICATION_CONFIDENCE_THRESHOLD = float(
+    os.getenv("CLASSIFICATION_CONFIDENCE_THRESHOLD", "0.6")
+)
 
 
 @app.on_event("startup")
@@ -52,6 +61,11 @@ def _to_out(order: Order) -> OrderOut:
         duplicate_of_id=order.duplicate_of_id,
         assigned_employee_id=order.assigned_employee_id,
         assigned_at=order.assigned_at,
+        ai_suggested_skills=order.ai_suggested_skills,
+        ai_suggested_priority=order.ai_suggested_priority,
+        ai_confidence=order.ai_confidence,
+        ai_reasoning=order.ai_reasoning,
+        ai_classified_at=order.ai_classified_at,
         created_at=order.created_at,
     )
 
@@ -60,6 +74,39 @@ def _skills_set(comma_separated: str | None) -> frozenset[str]:
     if not comma_separated:
         return frozenset()
     return frozenset(s.strip().lower() for s in comma_separated.split(",") if s.strip())
+
+
+def _apply_classification(order: Order, result) -> None:
+    """Stamp the ai_* fields from a ClassificationResult, and fill
+    required_skills only if it's still blank and confidence clears the
+    threshold. Shared by submit_order() (silent on failure) and
+    reclassify_order() (surfaces failure as a 502) -- both apply a
+    successful result identically."""
+    order.ai_suggested_skills = ",".join(sorted(result.suggested_skills)) or None
+    order.ai_suggested_priority = result.suggested_priority
+    order.ai_confidence = result.confidence
+    order.ai_reasoning = result.reasoning
+    order.ai_classified_at = datetime.now(timezone.utc)
+
+    if (
+        not order.required_skills
+        and result.suggested_skills
+        and result.confidence >= CLASSIFICATION_CONFIDENCE_THRESHOLD
+    ):
+        order.required_skills = ",".join(sorted(result.suggested_skills))
+
+
+def _run_classification(order: Order) -> None:
+    """Best-effort enrichment used at submission time: attempt to classify
+    `order.description` and apply the result. Any failure (network, bad
+    key, malformed response) is swallowed -- Phase 3 is an enrichment
+    layer order ingestion doesn't depend on, not something that should
+    turn a classification hiccup into a 500 on /orders."""
+    try:
+        result = classify_order(order.description)
+    except ClassificationError:
+        return
+    _apply_classification(order, result)
 
 
 @app.post("/orders", response_model=OrderOut, status_code=201)
@@ -92,7 +139,39 @@ def submit_order(payload: OrderCreate, db: Session = Depends(get_db)):
         duplicate_of_id=result.duplicate_of_id,
         raw_payload=payload.model_dump_json(),
     )
+
+    # Only classify when there's a gap to fill -- required_skills already
+    # given is a human's explicit answer, and Phase 3 never second-guesses
+    # that (see the README's design notes). Runs synchronously, so it adds
+    # real LLM latency to this request when it fires; a background job
+    # (Celery, as the Autonomous Workflow Broker project uses) would be
+    # the fix if that latency ever becomes a problem worth solving.
+    if status != "rejected" and not order.required_skills:
+        _run_classification(order)
+
     db.add(order)
+    db.commit()
+    db.refresh(order)
+    return _to_out(order)
+
+
+@app.post("/orders/{order_id}/classify", response_model=OrderOut)
+def reclassify_order(order_id: int, db: Session = Depends(get_db)):
+    """Re-run classification for an existing order -- useful when the
+    first attempt failed (e.g. a transient API error) or after the
+    confidence threshold's been tuned. Same rule as at submission time:
+    only fills required_skills if it's still blank."""
+    order = db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(404, "Not found")
+
+    try:
+        result = classify_order(order.description)
+    except ClassificationError as exc:
+        raise HTTPException(502, f"classification failed: {exc}")
+
+    _apply_classification(order, result)
+
     db.commit()
     db.refresh(order)
     return _to_out(order)

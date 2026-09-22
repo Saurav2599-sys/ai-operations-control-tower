@@ -133,3 +133,146 @@ def test_assignment_run_leaves_uncoverable_order_as_validated(client):
 def test_assignment_run_rejects_unknown_strategy(client):
     resp = client.post("/assignments/run", params={"strategy": "bogus"})
     assert resp.status_code == 400
+
+
+# ---- Phase 3: classification -----------------------------------------
+
+def test_submit_order_without_skills_runs_classification_and_fills_on_high_confidence(
+    client, monkeypatch
+):
+    import app.api as api_module
+    from app.classification import ClassificationResult
+
+    def fake_classify(description):
+        return ClassificationResult(
+            suggested_skills=frozenset({"hvac"}),
+            suggested_priority="high",
+            confidence=0.9,
+            reasoning="Mentions a broken AC unit.",
+        )
+
+    monkeypatch.setattr(api_module, "classify_order", fake_classify)
+
+    resp = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "The AC is broken",
+        "location": "Austin, TX", "priority": "normal",
+    })
+    body = resp.json()
+    assert body["required_skills"] == "hvac"
+    assert body["ai_suggested_skills"] == "hvac"
+    assert body["ai_suggested_priority"] == "high"
+    assert body["ai_confidence"] == 0.9
+    assert body["ai_classified_at"] is not None
+
+
+def test_submit_order_low_confidence_suggestion_is_visible_but_not_applied(client, monkeypatch):
+    import app.api as api_module
+    from app.classification import ClassificationResult
+
+    def fake_classify(description):
+        return ClassificationResult(
+            suggested_skills=frozenset({"electrical"}),
+            suggested_priority="low",
+            confidence=0.2,
+            reasoning="Vague description.",
+        )
+
+    monkeypatch.setattr(api_module, "classify_order", fake_classify)
+
+    resp = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "Something's off",
+        "location": "Austin, TX", "priority": "normal",
+    })
+    body = resp.json()
+    assert body["required_skills"] is None
+    assert body["ai_suggested_skills"] == "electrical"
+    assert body["ai_confidence"] == 0.2
+
+
+def test_submit_order_with_explicit_skills_never_calls_classification(client, monkeypatch):
+    import app.api as api_module
+
+    calls = []
+
+    def fake_classify(description):
+        calls.append(description)
+        return None  # would blow up if actually used -- shouldn't be
+
+    monkeypatch.setattr(api_module, "classify_order", fake_classify)
+
+    resp = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "Fix the pipe",
+        "location": "Austin, TX", "priority": "normal", "required_skills": "plumbing",
+    })
+    body = resp.json()
+    assert body["required_skills"] == "plumbing"
+    assert body["ai_suggested_skills"] is None
+    assert calls == []
+
+
+def test_submit_order_classification_failure_degrades_gracefully(client, monkeypatch):
+    import app.api as api_module
+    from app.classification import ClassificationError
+
+    def fake_classify(description):
+        raise ClassificationError("boom")
+
+    monkeypatch.setattr(api_module, "classify_order", fake_classify)
+
+    resp = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "Fix the thing",
+        "location": "Austin, TX", "priority": "normal",
+    })
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["status"] == "validated"
+    assert body["ai_suggested_skills"] is None
+
+
+def test_reclassify_endpoint_applies_result(client, monkeypatch):
+    import app.api as api_module
+    from app.classification import ClassificationResult
+
+    order = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "Something vague",
+        "location": "Austin, TX", "priority": "normal",
+    }).json()
+    assert order["required_skills"] is None
+
+    def fake_classify(description):
+        return ClassificationResult(
+            suggested_skills=frozenset({"carpentry"}),
+            suggested_priority="normal",
+            confidence=0.95,
+            reasoning="Reclassified.",
+        )
+
+    monkeypatch.setattr(api_module, "classify_order", fake_classify)
+
+    resp = client.post(f"/orders/{order['id']}/classify")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["required_skills"] == "carpentry"
+
+
+def test_reclassify_endpoint_404_for_missing_order(client):
+    resp = client.post("/orders/99999/classify")
+    assert resp.status_code == 404
+
+
+def test_reclassify_endpoint_surfaces_failure_as_502(client, monkeypatch):
+    import app.api as api_module
+    from app.classification import ClassificationError
+
+    order = client.post("/orders", json={
+        "customer_name": "Acme Corp", "description": "Something",
+        "location": "Austin, TX", "priority": "normal",
+    }).json()
+
+    def fake_classify(description):
+        raise ClassificationError("boom")
+
+    monkeypatch.setattr(api_module, "classify_order", fake_classify)
+
+    resp = client.post(f"/orders/{order['id']}/classify")
+    assert resp.status_code == 502

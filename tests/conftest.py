@@ -46,3 +46,33 @@ def client(db_session):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm_calls(monkeypatch):
+    """No test may make a real call to OpenAI -- it would cost real money,
+    depend on network/API-key state, and make `pytest` non-deterministic
+    and slow. Every test's classify_order() fails closed by default
+    (raises ClassificationError), which exercises the same graceful-
+    degradation path a real OpenAI outage would -- see
+    test_submit_order_classification_failure_degrades_gracefully for that
+    behavior tested explicitly.
+
+    Tests that care about a specific classification outcome (the Phase 3
+    section of test_api.py) override this within the test body itself via
+    their own monkeypatch.setattr(api_module, "classify_order", ...) --
+    that's a second call to the same monkeypatch fixture, which simply
+    replaces this patch for the rest of that test.
+
+    tests/test_classification.py doesn't go through this at all -- it
+    calls classify_order() directly against a FakeClient, never through
+    the FastAPI app, so this autouse fixture (which patches app.api's
+    reference to it) doesn't apply there.
+    """
+    import app.api as api_module
+    from app.classification import ClassificationError
+
+    def _fail(description):
+        raise ClassificationError("classification disabled in tests")
+
+    monkeypatch.setattr(api_module, "classify_order", _fail)

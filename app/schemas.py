@@ -33,6 +33,11 @@ class OrderOut(BaseModel):
     duplicate_of_id: Optional[int]
     assigned_employee_id: Optional[int]
     assigned_at: Optional[datetime]
+    ai_suggested_skills: Optional[str]
+    ai_suggested_priority: Optional[str]
+    ai_confidence: Optional[float]
+    ai_reasoning: Optional[str]
+    ai_classified_at: Optional[datetime]
     created_at: datetime
 
     class Config:

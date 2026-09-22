@@ -7,7 +7,7 @@ plus the "assigned" status the state machine comment below always said
 was coming.
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -69,6 +69,16 @@ class Order(Base):
     assigned_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     assigned_employee = relationship("Employee")
     assigned_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Phase 3: LLM classification results, stored separately from the
+    # authoritative required_skills/priority fields above -- see
+    # app/classification.py and "A note on Phase 3's design choices" in
+    # the README for why this is a suggestion, not an override.
+    ai_suggested_skills = Column(String, nullable=True)  # comma-separated
+    ai_suggested_priority = Column(String, nullable=True)
+    ai_confidence = Column(Float, nullable=True)
+    ai_reasoning = Column(Text, nullable=True)
+    ai_classified_at = Column(DateTime(timezone=True), nullable=True)
 
     # The exact payload as submitted, for audit -- if validation logic
     # changes later, you can always see what was actually sent.
