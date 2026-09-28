@@ -3,8 +3,7 @@ employees and order-to-employee assignment (Phase 2), and LLM-based
 classification of free-text order descriptions (Phase 3).
 
 Run with:  uvicorn app.api:app --reload --port 8001
-(port 8001, not 8000 -- the Autonomous Workflow Broker project's API
-already uses 8000 and you may have both checked out at once.)
+(port 8001, not 8000 -- the Autonomous Workflow Broker project's API)
 """
 
 import json
